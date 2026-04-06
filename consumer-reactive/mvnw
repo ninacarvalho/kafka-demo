@@ -1,0 +1,32 @@
+#!/bin/sh
+# Maven Wrapper Script
+# Regenerate with: mvn wrapper:wrapper -Dmaven=3.9.6
+
+set -e
+
+# Find project base directory
+MAVEN_PROJECTBASEDIR=$(pwd)
+
+# Locate the wrapper jar
+WRAPPER_JAR="$MAVEN_PROJECTBASEDIR/.mvn/wrapper/maven-wrapper.jar"
+WRAPPER_PROPERTIES="$MAVEN_PROJECTBASEDIR/.mvn/wrapper/maven-wrapper.properties"
+
+# If wrapper jar is present, use it
+if [ -f "$WRAPPER_JAR" ]; then
+    exec java \
+        -classpath "$WRAPPER_JAR" \
+        org.apache.maven.wrapper.MavenWrapperMain \
+        "$@"
+fi
+
+# If Maven is available on PATH, delegate directly
+if command -v mvn >/dev/null 2>&1; then
+    exec mvn "$@"
+fi
+
+echo ""
+echo "Error: Maven not found and wrapper jar is missing."
+echo "Either install Maven or generate the wrapper jar by running:"
+echo "  mvn wrapper:wrapper -Dmaven=3.9.6"
+echo ""
+exit 1
