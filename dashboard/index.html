@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kafka Consumer Dashboard — MVC vs Reactive</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg:        #0f172a;
+            --surface:   #1e293b;
+            --border:    #334155;
+            --muted:     #64748b;
+            --text:      #f1f5f9;
+            --subtext:   #94a3b8;
+            --mvc:       #3b82f6;
+            --reactive:  #a855f7;
+            --warn:      #f59e0b;
+            --ok:        #22c55e;
+            --err:       #ef4444;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 1.25rem;
+        }
+
+        /* ── Header ── */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+        .header-left h1 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .header-left p {
+            font-size: 0.78rem;
+            color: var(--subtext);
+            margin-top: 0.2rem;
+        }
+
+        /* ── Mode badge & connection pills ── */
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .mode-badge {
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .mode-sim  { background: #1e3a5f; color: #60a5fa; border: 1px solid var(--mvc); }
+        .mode-live { background: #14532d; color: #4ade80; border: 1px solid var(--ok); }
+
+        .conn-pill {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.28rem 0.65rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            border: 1px solid var(--border);
+            background: var(--surface);
+        }
+        .conn-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: background 0.3s;
+        }
+        .conn-dot.ok   { background: var(--ok);  box-shadow: 0 0 6px var(--ok); }
+        .conn-dot.err  { background: var(--err); }
+        .conn-dot.checking { background: var(--warn); animation: pulse 1s infinite; }
+
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        /* ── Controls ── */
+        .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.85rem 1.25rem;
+            margin-bottom: 1.25rem;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        label { color: var(--subtext); font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+        input[type=range] { accent-color: var(--mvc); width: 110px; cursor: pointer; }
+        .val { font-weight: 700; font-size: 0.85rem; min-width: 2.8rem; }
+
+        .sim-controls { display: flex; gap: 0.6rem; align-items: center; }
+        .note { font-size: 0.7rem; color: var(--muted); margin-left: auto; }
+        .note b { color: var(--subtext); }
+
+        .btn {
+            padding: 0.45rem 1.1rem;
+            border-radius: 7px;
+            border: none;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-start  { background: var(--ok);  color: #000; }
+        .btn-stop   { background: var(--err); color: #fff; }
+        .btn-reset  { background: var(--border); color: var(--text); }
+
+        /* ── Stats row ── */
+        .stats-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .stats-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.9rem 1.1rem;
+        }
+        .stats-card.mvc      { border-top: 3px solid var(--mvc); }
+        .stats-card.reactive { border-top: 3px solid var(--reactive); }
+        .stats-card-title {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            margin-bottom: 0.75rem;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.5rem;
+        }
+        .stat { }
+        .stat-label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+        .stat-value { font-size: 1.35rem; font-weight: 700; margin-top: 0.1rem; }
+        .mvc-col      { color: var(--mvc); }
+        .reactive-col { color: var(--reactive); }
+        .warn-col     { color: var(--warn); }
+        .sub-col      { color: var(--subtext); }
+
+        /* ── Main grid ── */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        /* ── Thread panels ── */
+        .thread-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem 1.1rem;
+        }
+        .thread-panel.mvc      { border-top: 3px solid var(--mvc); }
+        .thread-panel.reactive { border-top: 3px solid var(--reactive); }
+        .tp-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 0.75rem;
+        }
+        .tp-title  { font-weight: 700; font-size: 0.9rem; }
+        .tp-badge  { font-size: 0.7rem; color: var(--subtext); }
+        .thread-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            min-height: 100px;
+            align-content: flex-start;
+        }
+
+        .thread-chip {
+            width: 56px;
+            height: 54px;
+            border-radius: 7px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid transparent;
+            transition: background 0.25s, border-color 0.25s;
+            text-align: center;
+            padding: 3px;
+        }
+        .tc-name  { font-size: 0.5rem; opacity: 0.65; word-break: break-all; line-height: 1.2; }
+        .tc-state { font-size: 0.62rem; font-weight: 700; margin-top: 2px; }
+
+        /* State colours — matching thread states from the JVM */
+        .s-idle    { background: #1e3a5f44; border-color: #3b82f6; color: #93c5fd; }
+        .s-poll    { background: #1e3a2f88; border-color: #22c55e; color: #86efac; }
+        .s-blocked { background: #4a200099; border-color: #f59e0b; color: #fcd34d; }
+        .s-commit  { background: #2d1b6999; border-color: #8b5cf6; color: #c4b5fd; }
+        .s-rx-poll { background: #1e3a5f88; border-color: #3b82f6; color: #93c5fd; }
+        .s-rx-sched{ background: #3b076499; border-color: #a855f7; color: #e9d5ff; }
+
+        /* ── Bottom grid: chart + legend ── */
+        .bottom-grid {
+            display: grid;
+            grid-template-columns: 1fr 280px;
+            gap: 1rem;
+        }
+        .chart-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem 1.1rem;
+        }
+        .chart-title { font-size: 0.72rem; font-weight: 700; color: var(--subtext); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+
+        .legend-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem 1.1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .legend-section-title { font-size: 0.68rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .legend-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.72rem; color: var(--subtext); }
+        .lchip { width: 22px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+        .insight {
+            margin-top: auto;
+            padding: 0.65rem 0.75rem;
+            background: #0f172a;
+            border-radius: 7px;
+            font-size: 0.7rem;
+            color: var(--subtext);
+            line-height: 1.55;
+        }
+        .insight b { color: var(--text); }
+    </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header>
+    <div class="header-left">
+        <h1>Kafka Consumer Dashboard</h1>
+        <p>Spring MVC (@KafkaListener) &nbsp;vs&nbsp; Reactive Spring (KafkaReceiver)</p>
+    </div>
+    <div class="header-right">
+        <div class="conn-pill">
+            <div class="conn-dot checking" id="mvc-dot"></div>
+            <span>MVC :8081</span>
+        </div>
+        <div class="conn-pill">
+            <div class="conn-dot checking" id="rx-dot"></div>
+            <span>Reactive :8082</span>
+        </div>
+        <span class="mode-badge mode-sim" id="mode-badge">Simulation</span>
+    </div>
+</header>
+
+<!-- ── Controls ───────────────────────────────────────────────────────────── -->
+<div class="controls">
+    <div class="control-group" id="sim-sliders">
+        <label>Partitions</label>
+        <input type="range" id="partitions" min="1" max="24" value="4" oninput="onSlider()">
+        <span class="val" id="pval">4</span>
+    </div>
+    <div class="control-group" id="sim-sliders2">
+        <label>I/O latency</label>
+        <input type="range" id="latency" min="50" max="500" step="25" value="100" oninput="onSlider()">
+        <span class="val" id="lval">100 ms</span>
+    </div>
+    <div class="control-group" id="sim-sliders3">
+        <label>Msg rate</label>
+        <input type="range" id="msgrate" min="1" max="50" value="15" oninput="onSlider()">
+        <span class="val" id="mval">15/s</span>
+    </div>
+    <div class="sim-controls" id="sim-btns">
+        <button class="btn btn-start" id="btn-start" onclick="startSim()">▶ Start</button>
+        <button class="btn btn-stop"  id="btn-stop"  onclick="stopSim()"  disabled>■ Stop</button>
+        <button class="btn btn-reset" onclick="resetAll()">↺ Reset</button>
+    </div>
+    <span class="note" id="live-note" style="display:none">
+        <b>Live mode</b> — polling <code>localhost:8081</code> &amp; <code>localhost:8082</code> every second.
+        Sliders disabled.
+    </span>
+</div>
+
+<!-- ── Stats ──────────────────────────────────────────────────────────────── -->
+<div class="stats-row">
+    <div class="stats-card mvc">
+        <div class="stats-card-title mvc-col">Spring MVC · @KafkaListener</div>
+        <div class="stats-grid">
+            <div class="stat"><div class="stat-label">Threads</div><div class="stat-value mvc-col" id="s-mvc-threads">—</div></div>
+            <div class="stat"><div class="stat-label">Blocked</div><div class="stat-value warn-col" id="s-mvc-blocked">—</div></div>
+            <div class="stat"><div class="stat-label">Mem (est.)</div><div class="stat-value sub-col" id="s-mvc-mem">—</div></div>
+            <div class="stat"><div class="stat-label">Msgs processed</div><div class="stat-value sub-col" id="s-mvc-msgs">—</div></div>
+        </div>
+    </div>
+    <div class="stats-card reactive">
+        <div class="stats-card-title reactive-col">Reactive Spring · KafkaReceiver</div>
+        <div class="stats-grid">
+            <div class="stat"><div class="stat-label">Threads</div><div class="stat-value reactive-col" id="s-rx-threads">—</div></div>
+            <div class="stat"><div class="stat-label">Blocked</div><div class="stat-value warn-col" id="s-rx-blocked">—</div></div>
+            <div class="stat"><div class="stat-label">Mem (est.)</div><div class="stat-value sub-col" id="s-rx-mem">—</div></div>
+            <div class="stat"><div class="stat-label">Msgs processed</div><div class="stat-value sub-col" id="s-rx-msgs">—</div></div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Thread pools ───────────────────────────────────────────────────────── -->
+<div class="main-grid">
+    <div class="thread-panel mvc">
+        <div class="tp-header">
+            <span class="tp-title mvc-col">MVC Thread Pool</span>
+            <span class="tp-badge" id="mvc-tp-badge">1 thread per partition</span>
+        </div>
+        <div class="thread-grid" id="mvc-grid"></div>
+    </div>
+    <div class="thread-panel reactive">
+        <div class="tp-header">
+            <span class="tp-title reactive-col">Reactive Thread Pool</span>
+            <span class="tp-badge">always 2 threads</span>
+        </div>
+        <div class="thread-grid" id="rx-grid"></div>
+    </div>
+</div>
+
+<!-- ── Chart + legend ─────────────────────────────────────────────────────── -->
+<div class="bottom-grid">
+    <div class="chart-card">
+        <div class="chart-title">Kafka thread count over time</div>
+        <canvas id="chart" height="120"></canvas>
+    </div>
+    <div class="legend-card">
+        <div class="legend-section-title">Thread states</div>
+        <div class="legend-row"><div class="lchip" style="background:#1e3a5f;border:2px solid #3b82f6"></div>Idle / ready</div>
+        <div class="legend-row"><div class="lchip" style="background:#1e3a2f;border:2px solid #22c55e"></div>Polling Kafka</div>
+        <div class="legend-row"><div class="lchip" style="background:#4a2000;border:2px solid #f59e0b"></div>Blocked on I/O ⚠</div>
+        <div class="legend-row"><div class="lchip" style="background:#2d1b69;border:2px solid #8b5cf6"></div>Committing offset</div>
+        <div class="insight">
+            <b>MVC:</b> one thread per partition, held while waiting on I/O. Adding partitions adds threads.<br><br>
+            <b>Reactive:</b> always exactly 2 — <code>kafka-poll-0</code> and <code>kafka-batch-0</code>. Partition count is irrelevant.
+        </div>
+    </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════
+const MVC_URL = 'http://localhost:8081/metrics';
+const RX_URL  = 'http://localhost:8082/metrics';
+const POLL_MS = 1000;   // live polling interval
+const TICK_MS = 400;    // simulation tick
+const HISTORY = 50;
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
+let mode = 'sim';       // 'sim' | 'live'
+let simTimer = null;
+let liveTimer = null;
+let tick = 0;
+
+// Simulation internals
+let mvcStates   = [];   // array of state strings per partition
+let mvcPhase    = {};   // phase counter per partition index
+let mvcMsgs     = 0;
+let rxMsgs      = 0;
+let rxSchedPhase = 0;
+let rxSchedState = 'processing';
+
+// Chart data
+const mvcHist  = Array(HISTORY).fill(null);
+const rxHist   = Array(HISTORY).fill(null);
+const labels   = Array(HISTORY).fill('');
+
+// ═══════════════════════════════════════════════════════════════════
+// CHART
+// ═══════════════════════════════════════════════════════════════════
+const chart = new Chart(document.getElementById('chart').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels,
+        datasets: [
+            { label: 'MVC threads',      data: mvcHist, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.07)', fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 },
+            { label: 'Reactive threads', data: rxHist,  borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.07)', fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 }
+        ]
+    },
+    options: {
+        responsive: true, animation: false,
+        plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 14 } } },
+        scales: {
+            x: { ticks: { color: '#475569', maxTicksLimit: 5 }, grid: { color: '#1e293b' } },
+            y: { min: 0, suggestedMax: 6, ticks: { color: '#475569', stepSize: 2 }, grid: { color: '#334155' } }
+        }
+    }
+});
+
+function pushChart(mvc, rx) {
+    mvcHist.shift(); mvcHist.push(mvc);
+    rxHist.shift();  rxHist.push(rx);
+    labels.shift();  labels.push('');
+    chart.update('none');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RENDER HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function renderStats(side, threads, blocked, msgs) {
+    const mem = threads + ' MB';
+    if (side === 'mvc') {
+        document.getElementById('s-mvc-threads').textContent = threads;
+        document.getElementById('s-mvc-blocked').textContent = blocked;
+        document.getElementById('s-mvc-mem').textContent     = mem;
+        document.getElementById('s-mvc-msgs').textContent    = msgs.toLocaleString();
+    } else {
+        document.getElementById('s-rx-threads').textContent  = threads;
+        document.getElementById('s-rx-blocked').textContent  = blocked;
+        document.getElementById('s-rx-mem').textContent      = mem;
+        document.getElementById('s-rx-msgs').textContent     = msgs.toLocaleString();
+    }
+}
+
+function makeChip(name, stateClass, stateLabel) {
+    const d = document.createElement('div');
+    d.className = 'thread-chip ' + stateClass;
+    d.innerHTML = `<span class="tc-name">${name}</span><span class="tc-state">${stateLabel}</span>`;
+    return d;
+}
+
+function renderMvcGrid(states) {
+    const grid = document.getElementById('mvc-grid');
+    grid.innerHTML = '';
+    states.forEach((st, i) => {
+        const [cls, lbl] = threadStyle(st);
+        grid.appendChild(makeChip(`listener-${i}`, cls, lbl));
+    });
+    document.getElementById('mvc-tp-badge').textContent =
+        states.length + ' thread' + (states.length !== 1 ? 's' : '');
+}
+
+function renderRxGrid() {
+    const grid = document.getElementById('rx-grid');
+    grid.innerHTML = '';
+    grid.appendChild(makeChip('kafka-poll-0',  's-rx-poll',  'Pushing'));
+    grid.appendChild(makeChip('kafka-batch-0', 's-rx-sched', rxSchedState === 'processing' ? 'Processing' : 'Idle'));
+}
+
+// Live mode: render from real thread data
+function renderMvcGridLive(threads) {
+    const grid = document.getElementById('mvc-grid');
+    grid.innerHTML = '';
+    const kafka = threads.filter(t => t.isKafkaThread);
+    kafka.forEach(t => {
+        const [cls, lbl] = jvmStateStyle(t.state);
+        const shortName = t.name.replace('org.springframework.kafka.KafkaListenerEndpointContainer', 'listener').split('-').slice(-3).join('-');
+        grid.appendChild(makeChip(shortName, cls, lbl));
+    });
+    document.getElementById('mvc-tp-badge').textContent =
+        kafka.length + ' kafka thread' + (kafka.length !== 1 ? 's' : '');
+}
+
+function renderRxGridLive(threads) {
+    const grid = document.getElementById('rx-grid');
+    grid.innerHTML = '';
+    const kafka = threads.filter(t => t.isKafkaThread);
+    if (kafka.length === 0) {
+        // fallback: show the 2 expected threads
+        grid.appendChild(makeChip('kafka-poll-0',  's-rx-poll',  'Pushing'));
+        grid.appendChild(makeChip('kafka-batch-0', 's-rx-sched', 'Processing'));
+    } else {
+        kafka.forEach(t => {
+            const isPoll = t.name.includes('poll');
+            const cls = isPoll ? 's-rx-poll' : 's-rx-sched';
+            const lbl = isPoll ? 'Pushing' : jvmStateStyle(t.state)[1];
+            const shortName = t.name.split('-').slice(-2).join('-');
+            grid.appendChild(makeChip(shortName, cls, lbl));
+        });
+    }
+}
+
+function threadStyle(st) {
+    if (st === 'poll')    return ['s-poll',    'Polling'];
+    if (st === 'blocked') return ['s-blocked', 'Blocked ⚠'];
+    if (st === 'commit')  return ['s-commit',  'Committing'];
+    return ['s-idle', 'Idle'];
+}
+
+function jvmStateStyle(st) {
+    if (st === 'BLOCKED')        return ['s-blocked', 'Blocked ⚠'];
+    if (st === 'TIMED_WAITING')  return ['s-blocked', 'Waiting'];
+    if (st === 'WAITING')        return ['s-idle',    'Waiting'];
+    if (st === 'RUNNABLE')       return ['s-poll',    'Running'];
+    return ['s-idle', 'Idle'];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SIMULATION
+// ═══════════════════════════════════════════════════════════════════
+function getParams() {
+    return {
+        partitions: parseInt(document.getElementById('partitions').value),
+        latencyMs:  parseInt(document.getElementById('latency').value),
+        msgPerSec:  parseInt(document.getElementById('msgrate').value),
+    };
+}
+
+function onSlider() {
+    const p = getParams();
+    document.getElementById('pval').textContent = p.partitions;
+    document.getElementById('lval').textContent = p.latencyMs + ' ms';
+    document.getElementById('mval').textContent = p.msgPerSec + '/s';
+    if (simTimer) rebuildMvcThreads(p.partitions);
+}
+
+function rebuildMvcThreads(count) {
+    while (mvcStates.length < count) {
+        const i = mvcStates.length;
+        mvcStates.push('idle');
+        mvcPhase[i] = Math.floor(Math.random() * 4); // stagger
+    }
+    mvcStates = mvcStates.slice(0, count);
+}
+
+function simStep() {
+    tick++;
+    const { partitions, latencyMs, msgPerSec } = getParams();
+    const blockedTicks = Math.max(1, Math.round(latencyMs / TICK_MS));
+
+    // Rebuild if partition count changed via slider
+    rebuildMvcThreads(partitions);
+
+    // MVC: cycle each thread through poll → blocked(N) → commit → idle
+    let mvcBlocked = 0;
+    for (let i = 0; i < partitions; i++) {
+        if (mvcPhase[i] === undefined) mvcPhase[i] = 0;
+        const pc = mvcPhase[i];
+        if (pc === 0) {
+            mvcStates[i] = 'poll';
+            mvcPhase[i] = 1;
+        } else if (pc >= 1 && pc <= blockedTicks) {
+            mvcStates[i] = 'blocked';
+            if (pc === blockedTicks) {
+                mvcMsgs += Math.max(1, Math.round(msgPerSec * TICK_MS / 1000 / partitions));
+            }
+            mvcPhase[i]++;
+        } else if (pc === blockedTicks + 1) {
+            mvcStates[i] = 'commit';
+            mvcPhase[i]++;
+        } else {
+            mvcStates[i] = 'idle';
+            mvcPhase[i] = 0;
+        }
+        if (mvcStates[i] === 'blocked') mvcBlocked++;
+    }
+    renderMvcGrid(mvcStates.slice(0, partitions));
+
+    // Reactive: scheduler alternates processing/idle
+    if (rxSchedPhase === 0) {
+        rxSchedState = 'processing';
+        rxSchedPhase = 1;
+    } else if (rxSchedPhase <= blockedTicks) {
+        rxSchedPhase++;
+        if (rxSchedPhase > blockedTicks) {
+            rxMsgs += Math.max(1, Math.round(msgPerSec * TICK_MS / 1000));
+        }
+    } else {
+        rxSchedState = 'idle';
+        rxSchedPhase = 0;
+    }
+    renderRxGrid();
+
+    renderStats('mvc', partitions, mvcBlocked, mvcMsgs);
+    renderStats('rx',  2,          0,           rxMsgs);
+    pushChart(partitions, 2);
+}
+
+function startSim() {
+    if (simTimer) return;
+    const { partitions } = getParams();
+    rebuildMvcThreads(partitions);
+    simTimer = setInterval(simStep, TICK_MS);
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-stop').disabled  = false;
+}
+
+function stopSim() {
+    clearInterval(simTimer); simTimer = null;
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-stop').disabled  = true;
+}
+
+function resetAll() {
+    stopSim();
+    tick = 0; mvcMsgs = 0; rxMsgs = 0;
+    mvcStates = []; mvcPhase = {};
+    rxSchedPhase = 0; rxSchedState = 'processing';
+    mvcHist.fill(null); rxHist.fill(null);
+    chart.update('none');
+    document.getElementById('mvc-grid').innerHTML = '';
+    document.getElementById('rx-grid').innerHTML  = '';
+    ['s-mvc-threads','s-mvc-blocked','s-mvc-mem','s-mvc-msgs',
+     's-rx-threads','s-rx-blocked','s-rx-mem','s-rx-msgs'].forEach(id => {
+        document.getElementById(id).textContent = '—';
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// LIVE MODE  — polls /metrics on both Spring Boot apps
+// ═══════════════════════════════════════════════════════════════════
+let mvcOnline = false;
+let rxOnline  = false;
+
+async function fetchMetrics(url) {
+    try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(900) });
+        if (!res.ok) return null;
+        return await res.json();
+    } catch {
+        return null;
+    }
+}
+
+function setDot(id, state) {
+    const el = document.getElementById(id);
+    el.className = 'conn-dot ' + state; // ok | err | checking
+}
+
+async function pollLive() {
+    const [mvcData, rxData] = await Promise.all([
+        fetchMetrics(MVC_URL),
+        fetchMetrics(RX_URL)
+    ]);
+
+    mvcOnline = !!mvcData;
+    rxOnline  = !!rxData;
+    setDot('mvc-dot', mvcOnline ? 'ok' : 'err');
+    setDot('rx-dot',  rxOnline  ? 'ok' : 'err');
+
+    const bothLive = mvcOnline && rxOnline;
+    const wasLive  = mode === 'live';
+
+    if (bothLive && !wasLive) enterLiveMode();
+    if (!bothLive && wasLive) enterSimMode();
+
+    if (mvcOnline) {
+        renderMvcGridLive(mvcData.threads || []);
+        renderStats('mvc',
+            mvcData.kafkaThreadCount ?? mvcData.threadCount ?? '—',
+            mvcData.blockedCount ?? '—',
+            mvcData.messagesProcessed ?? '—'
+        );
+    }
+    if (rxOnline) {
+        renderRxGridLive(rxData.threads || []);
+        renderStats('rx',
+            rxData.kafkaThreadCount ?? rxData.threadCount ?? '—',
+            rxData.blockedCount ?? '—',
+            rxData.messagesProcessed ?? '—'
+        );
+    }
+
+    if (bothLive) {
+        pushChart(
+            mvcData.kafkaThreadCount ?? 0,
+            rxData.kafkaThreadCount  ?? 2
+        );
+    }
+}
+
+function enterLiveMode() {
+    mode = 'live';
+    stopSim();
+    document.getElementById('mode-badge').textContent  = 'Live';
+    document.getElementById('mode-badge').className    = 'mode-badge mode-live';
+    document.getElementById('live-note').style.display = 'inline';
+    document.getElementById('sim-btns').style.opacity  = '0.3';
+    document.getElementById('sim-btns').style.pointerEvents = 'none';
+    ['sim-sliders','sim-sliders2','sim-sliders3'].forEach(id => {
+        document.getElementById(id).style.opacity = '0.3';
+        document.getElementById(id).style.pointerEvents = 'none';
+    });
+}
+
+function enterSimMode() {
+    mode = 'sim';
+    document.getElementById('mode-badge').textContent  = 'Simulation';
+    document.getElementById('mode-badge').className    = 'mode-badge mode-sim';
+    document.getElementById('live-note').style.display = 'none';
+    document.getElementById('sim-btns').style.opacity  = '';
+    document.getElementById('sim-btns').style.pointerEvents = '';
+    ['sim-sliders','sim-sliders2','sim-sliders3'].forEach(id => {
+        document.getElementById(id).style.opacity = '';
+        document.getElementById(id).style.pointerEvents = '';
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════════
+onSlider();
+
+// Start live-probe loop immediately (every 1 second)
+pollLive();
+liveTimer = setInterval(pollLive, POLL_MS);
+</script>
+</body>
+</html>

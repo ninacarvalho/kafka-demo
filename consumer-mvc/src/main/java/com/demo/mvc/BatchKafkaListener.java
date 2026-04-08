@@ -11,6 +11,7 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Spring MVC-style Kafka consumer.
@@ -32,6 +33,7 @@ import java.util.List;
 public class BatchKafkaListener {
 
     private static final Logger log = LoggerFactory.getLogger(BatchKafkaListener.class);
+    public static final AtomicLong messagesProcessed = new AtomicLong(0);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // Spring Kafka batch listener:
@@ -69,6 +71,7 @@ public class BatchKafkaListener {
                 // This blocks the listener thread for 100ms per record.
                 Thread.sleep(100);
 
+                messagesProcessed.incrementAndGet();
                 log.info("[PROCESSED] partition={}, offset={}, event={}",
                     record.partition(), record.offset(), event);
                 return; // success

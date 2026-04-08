@@ -18,6 +18,7 @@ import reactor.util.retry.Retry;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Reactive Kafka consumer using Project Reactor + reactor-kafka.
@@ -43,6 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ReactiveKafkaConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(ReactiveKafkaConsumer.class);
+    public static final AtomicLong messagesProcessed = new AtomicLong(0);
 
     private final KafkaReceiver<String, String> kafkaReceiver;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -135,6 +137,7 @@ public class ReactiveKafkaConsumer {
             // This blocks the batchScheduler thread, but NOT the Kafka poll thread.
             Thread.sleep(100);
 
+            messagesProcessed.incrementAndGet();
             log.info("[PROCESSED] partition={}, offset={}, event={}",
                 record.partition(), record.offset(), event);
 
